@@ -1,0 +1,209 @@
+---
+title: "Example Analysis"
+---
+
+## Ball Possession in soccer:does it lead to higher chances of winning?
+
+When we google the importance of ball possession in soccer, the top result is a blog from Perfect Soccer Skills that claims that "Every well-oiled soccer team works on possession because the coaches know that it greatly increases their chances of winning games." [@Amarikwa_2016] Soccer fans must be wondering: is that true? Does having higher ball possession actually improve the chances of winning? Let us try to shed light onto this question.
+
+![Pep Guardiola and Leo Messi, the iconic duo of the Barcelona team that made tiki-taka (a style ofplay based on ball possession) famous and winning [@Bairner_2023]](pep_messi.jpg)
+
+## The data
+
+The data comes a Kaggle database [@Mathien_2016], which I found out about by reading an article that was also trying to evaluate the importance of ball possession. [@Baig_2021] The author, Hugo Mathien, has created the database by performing web scraping from betting websites for all major European soccer matches between 2008 and 2016. I have downloaded the database as a RSQLIte database.
+
+```{r}
+#install.packages("RSQLite")
+library(RSQLite)
+## connect to db
+con <- dbConnect(drv=RSQLite::SQLite(), dbname="database.sqlite")
+
+## list all tables
+tables <- dbListTables(con)
+
+## exclude sqlite_sequence (contains table information)
+tables <- tables[tables != "sqlite_sequence"]
+
+lDataFrames <- vector("list", length=length(tables))
+
+## create a data.frame for each table
+for (i in seq(along=tables)) {
+  lDataFrames[[i]] <- dbGetQuery(conn=con, statement=paste("SELECT * FROM '", tables[[i]], "'", sep=""))
+}
+
+matches_data = lDataFrames[[3]]
+print(dim(matches_data))
+head(matches_data)
+```
+
+With the code above, we have selected from the database a data frame containing data (115 variables) for 25979 distinct matches. Now, let us perform some data wrangling to select variables of interest. For now, let us select ball possession and create a variable for goal difference.
+
+```{r}
+library (dplyr)
+matches_data <- matches_data %>%
+  select(possession, home_team_goal, away_team_goal) %>%
+  na.omit %>% 
+  mutate(goal_diff = home_team_goal - away_team_goal)
+head(matches_data$possession)
+```
+
+Looking at the possession column, we observe that the data in that column is not in the numerical format we would like, hence we need to convert it. In particular, we want the ball possession of the home team after 90 minutes, which is the last number within <homepos></homepos> blocks.
+
+```{r warning=FALSE}
+library(stringr)
+for (i in 1:length(matches_data$possession)){
+  locs = str_locate_all(matches_data$possession[i],"</homepos>")[[1]]
+  if (sum(dim(locs))>0){
+    loc=max(locs[,1])
+    matches_data$possession[i] = as.numeric(substring(matches_data$possession[i],loc-2,loc-1))
+  }
+  else{
+    matches_data$possession[i] = NA
+  }
+}
+matches_data = na.omit(matches_data)
+head(matches_data)
+```
+
+## Goal Difference vs Ball Possession
+
+As a first test, let us use linear regression to predict goal difference from ball possession.
+
+```{r warning=FALSE}
+model = lm(goal_diff~as.numeric(possession),matches_data)
+summary(model)
+```
+
+```{r warning=FALSE}
+library(ggplot2)
+
+# Create a scatterplot with a linear regression line
+ggplot(matches_data, aes(x = as.numeric(possession), y = goal_diff)) +
+  geom_point() +                # Scatterplot
+  geom_smooth(method = "lm") +  # Linear regression line
+  labs(title = "Goal Difference vs Ball Possession",
+       x = "Home Team Ball Possession",
+       y = "Home Team Goal Differece",
+       caption = "Scatterplot of goal difference (home team goals - away team goals) vs home team possesion. A linear regression is also shown")
+```
+
+::: {.callout-note}
+Note: Goal Difference by definition can only take integer values
+:::
+
+From the plot above, we can see that ball possession and goal difference are correlated, however we also see that high ball possession can still result in negative goal difference in some cases.
+
+## Goal Difference per Ball Possession group
+
+When considering tactics in soccer, teams focus on trying to have more or less ball possession, but they cannot exactly aim for a given percentage of ball possession so it makes sense to split possession data in classes. Let us separate Ball Possession data in groups:
+
+-   "Extremely High Possession": \>=75%
+
+-   "Very High Possession": 60-75%
+
+-   "High Possession": 50-60%
+
+-   "Low Possession": 40-50%
+
+-   "Very Low Possession": 25-40%
+
+-   "Extremely Low Possession": \<25%
+
+```{r}
+breaks = c(0,25,40,50,60,75,100)
+
+matches_data <- matches_data %>%
+  mutate(
+    factor_possession = cut(as.numeric(possession), breaks = breaks, labels = c("Extremely Low Possession", "Very Low Possession", "Low Possession", "High Possession", "Very High Possession", "Extremely High Possession"))
+  ) 
+
+result <- matches_data %>%
+  group_by(factor_possession) %>%
+  summarize(mean_gd = mean(goal_diff)) %>%
+  rename(
+    Bal_Possession_Group = factor_possession,
+    Mean_Goal_Difference = mean_gd
+  )
+
+
+print(result)
+```
+::: {.column-margin}
+Looking at the previous plot and the results below, it appears that the grand-mean of goal difference is positive. That is actually correct, and probably due to "home-field advantage"
+:::
+
+```{r}
+plot <- ggplot(matches_data, aes(x = factor_possession, y = goal_diff)) +
+  geom_bar(stat = "summary", fun = "mean", position = "dodge", fill = "skyblue") +
+  labs(
+    title = "Barplot of Mean Goal Difference by Ball Possession Group",
+    x = "Ball Possession Group",
+    y = "Mean Goal Difference",
+    caption = "The barplot shows the mean goal difference (home team goals - away team goals) for each home team ball possession group."
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# Print the plot
+print(plot)
+```
+It does appear that on average goal difference increases with higher ball possession. Does that actually affect end results in terms of W-T-L? Let us try to find out in the next section.
+
+## Win-Tie-Loss per Ball Possession group
+```{r}
+result <- matches_data %>%
+  mutate(outcome = case_when(
+    goal_diff > 0 ~ "Win",
+    goal_diff == 0 ~ "Tie",
+    goal_diff < 0 ~ "Loss"
+  )) %>%
+  group_by(factor_possession, outcome) %>%
+  summarize(count = n()) %>%
+  group_by(factor_possession) %>%
+  mutate(probability = count / sum(count))
+
+
+plot <- ggplot(result, aes(x = outcome, y = probability, fill = outcome)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(. ~ factor_possession) +
+  labs(
+    title = "Win, Tie, Loss Probability by Ball Possession Group",
+    x = "Outcome",
+    y = "Probability",
+    caption = "Barplot of Win-Tie-Loss probability for the home team for each home team ball possession group"
+  ) +
+  theme(strip.text.x = element_text(angle = 90, hjust = 1))
+
+print(plot)
+```
+::: {.callout-caution collapse="true"}
+This association between ball possession and win probability does not imply causality
+:::
+
+## Conclusions
+We have shown that higher ball possession is associated with a higher average goal differential, hence a higher probability of winning. In particular, we have shown that a home team with over 75\% ball possession has almost a 70\% chance of winning, while a home team with less than 25\% ball possession has about a 25\% chance of winning. This provides justification as to why coaches tend to focus on ball possession drills. However, further analysis is needed to provide more robust conclusions. Other covariates should be accounted for when performing the analysis to better identify the magnitude of the observed effect. Furthermore, it is difficult to make causal statement without a more rigorous framework in this context. What if teams win because they have better players and because they have better players it is easier to have higher ball possession for them, yet their goals come from individual great plays that have little to do with the passing schemes?
+
+## Data Dictionary
+```{r}
+data_dictionary <- data.frame(
+  Variable = names(matches_data),
+  Description = c("Ball Possession (expressed as percentage)", "Number of goals scored by home team", "Number of goals scored by away team", "Difference between home team goals and away team goals", "Ball Possession Group (categorical version of ball possession)"),
+  DataType = sapply(matches_data, class),
+  ExampleValue = sapply(matches_data, function(x) ifelse(length(unique(x)) <= 6, paste(unique(x), collapse = ", "), "Too many values"))
+)
+
+print(data_dictionary)
+```
+
+## Functions for each package
+
+-   dpylr:
+    -   select
+    -   na.omit
+    -   mutate
+    -   group_by
+    -   summarize
+    -   rename
+-   ggplot2:
+    -   geom_point
+    -   geom_smooth

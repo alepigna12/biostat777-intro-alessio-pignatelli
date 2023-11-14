@@ -1,0 +1,13 @@
+---
+title: "About"
+---
+
+## Education
+
+B.S in Engineering Sciences, Harvard University, 2023
+
+## Bio
+
+I am an engineer and in-progress biostatistician with a passion in mathematics. and I am dedicated to applying these skills in challenging environments, pushing the boundaries of biostatistics. My experience thus far has predominantly been in the healthcare industry, ranging from involvement in auditory and neurosurgery research to my current role as a statistician at a clinical trials independent consulting firm.
+
+In the next five years, my primary focus is on acquiring the necessary education and skills to stay abreast of the latest theoretical advancements and practical applications in biostatistics. I aim to be well-equipped to contribute meaningfully to the workforce, whether that involves continuing my work in healthcare or exploring opportunities to build models for technology optimization in companies such as Apple or Cisco, economic evaluations, or engaging in fintech modeling for the stock market. Confident in my leadership abilities developed through extracurricular activities and my team-bonding skills cultivated through a lifelong passion for playing volleyball, I approach every project with determination, creativity, and innovation, ensuring its successful completion in a timely manner.
